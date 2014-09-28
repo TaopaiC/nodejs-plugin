@@ -6,6 +6,7 @@ import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.BuildListener;
 import hudson.model.Computer;
+import hudson.model.Node;
 import hudson.model.Run;
 import jenkins.plugins.nodejs.NodeJSPlugin;
 import hudson.tasks.BuildWrapper;
@@ -45,21 +46,27 @@ public class NpmPackagesBuildWrapper extends BuildWrapper {
 
     @Override
     public Launcher decorateLauncher(final AbstractBuild build, Launcher launcher, BuildListener listener) throws IOException, InterruptedException, Run.RunnerAbortedException {
+        // Each tool can export zero or many directories to the PATH
+        final Node node =  Computer.currentComputer().getNode();
+        if (node == null) {
+            throw new IOException("Cannot install tools on the deleted node");
+        }
+
         return new DecoratedLauncher(launcher){
             @Override
             public Proc launch(ProcStarter starter) throws IOException {
                 // Avoiding potential NPE when calling starter.envs()
                 // Yes, this is weird...
-                String[] starterEnvs;
+                EnvVars vars;
                 try {
-                   starterEnvs = starter.envs();
+                    vars = toEnvVars(starter.envs());
                 } catch (NullPointerException ex) {
-                    starterEnvs = new String[0];
+                    vars = new EnvVars();
+                } catch (InterruptedException x) {
+                    throw new IOException(x);
                 }
 
                 String pathSeparator = File.pathSeparator;
-
-                EnvVars vars = toEnvVars(starterEnvs);
 
                 NodeJSInstallation nodeJSInstallation = 
                     NodeJSPlugin.instance().findInstallationByName(nodeJSInstallationName);
@@ -88,8 +95,8 @@ public class NpmPackagesBuildWrapper extends BuildWrapper {
                 return super.launch(starter.envs(Util.mapToEnv(vars)));
             }
 
-            private EnvVars toEnvVars(String[] envs) {
-                EnvVars vars = new EnvVars();
+            private EnvVars toEnvVars(String[] envs) throws IOException, InterruptedException {
+                EnvVars vars = node.toComputer().getEnvironment();
                 for (String line : envs) {
                     vars.addLine(line);
                 }
